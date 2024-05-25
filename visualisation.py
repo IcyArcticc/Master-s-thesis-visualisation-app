@@ -4,16 +4,78 @@ import utils
 
 # Main function to execute the script
 if __name__ == "__main__":
-    log_file = 'C:/Users/Adrian/Desktop/Magisterka/Badania/22.05.2024/MM/2024-05-22_11-19-40.log'  # Log file path
-    flag_intervals = utils.extract_flag_intervals(log_file)
+    log_file = 'C:/Users/Adrian/Desktop/Magisterka/Badania/22.05.2024/MM/2024-05-22_11-19-40.log'
+    flag_intervals, f1_base_time, total_duration_seconds = utils.extract_flag_intervals(log_file)
+    
     for interval in flag_intervals:
         print(interval)
+    
+    if f1_base_time:
+        f1_starting_time = f1_base_time.strftime('%H:%M:%S')
+        print(f"F1 flag starting time: {f1_starting_time}")
+    
+    if total_duration_seconds is not None:
+        print(f"Total duration from F1 start to last event: {total_duration_seconds} seconds")
 
 
 # Load EEG data from a file (.bdf)
-bdf_file_path = 'C:/Users/Adrian/Desktop/Magisterka/Badania/22.05.2024/MM/Testdata(poprawione).bdf' # Bdf file path
+bdf_file_path = 'C:/Users/Adrian/Desktop/Magisterka/Badania/22.05.2024/MM/Testdata.bdf' # Bdf file path
 raw = mne.io.read_raw_bdf(bdf_file_path, preload=True)
 raw.load_data()
+
+# ---------------- Extracting times --------------
+
+# Provided log details for log1
+log1_start_time = f1_starting_time
+log1_duration = total_duration_seconds  # in seconds
+log1_start_seconds = utils.time_to_seconds(log1_start_time)
+log1_end_seconds = log1_start_seconds + log1_duration
+
+# Provided log details for log2
+bdf_start_time = raw.info['meas_date'].time().strftime("%H:%M:%S")
+bdf_duration = raw.times[-1]  # in seconds
+bdf_start_seconds = utils.time_to_seconds(bdf_start_time)
+bdf_end_seconds = bdf_start_seconds + bdf_duration
+
+# Initialize variables to hold the synchronized times
+sync_start_seconds = 0
+sync_end_seconds = 0
+cut_from_start = 0
+cut_from_end = 0
+
+# Determine the appropriate case and adjust times accordingly
+if bdf_start_seconds <= log1_start_seconds:
+    if bdf_end_seconds <= log1_end_seconds:
+        # log2 starts before or at the same time and ends before or at the same time
+        sync_start_seconds = log1_start_seconds
+        sync_end_seconds = log1_end_seconds
+        cut_from_start = log1_start_seconds - bdf_start_seconds
+        cut_from_end = bdf_end_seconds - log1_end_seconds
+    else:
+        # log2 starts before or at the same time and ends after log1
+        sync_start_seconds = log1_start_seconds
+        sync_end_seconds = log1_end_seconds
+        cut_from_start = log1_start_seconds - bdf_start_seconds
+        cut_from_end = bdf_end_seconds - log1_end_seconds
+else:
+    if bdf_end_seconds >= log1_end_seconds:
+        # log2 starts after or at the same time and ends after or at the same time
+        sync_start_seconds = bdf_start_seconds
+        sync_end_seconds = bdf_start_seconds + log1_duration
+        cut_from_end = bdf_end_seconds - sync_end_seconds
+    else:
+        # log2 starts after or at the same time and ends before log1
+        sync_start_seconds = bdf_start_seconds
+        sync_end_seconds = bdf_start_seconds + log1_duration
+        cut_from_end = bdf_end_seconds - sync_end_seconds
+
+# Convert synchronized times back to time strings
+sync_start_time = utils.seconds_to_time(sync_start_seconds)
+sync_end_time = utils.seconds_to_time(sync_end_seconds)
+
+# ------------------------------------------------
+
+raw.crop(tmin=cut_from_start, tmax=(bdf_duration - cut_from_end))
 
 # Create needed directories
 directory_path = os.path.dirname(bdf_file_path)
@@ -64,4 +126,5 @@ for interval in flag_intervals:
     fig.set_figwidth(25)
     fig.set_figheight(10)
     fig.savefig(f'{directory_path}/Images/part_{tmin}_{tmax}_{interval[2]}.png', dpi=300)
+
 

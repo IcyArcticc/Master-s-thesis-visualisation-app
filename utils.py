@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 def extract_flag_intervals(log_file):
@@ -9,6 +9,7 @@ def extract_flag_intervals(log_file):
     current_flag = None
     start_time = None
     f1_base_time = None
+    last_event_time = None
 
     flag_mapping = {
         "Key.f1": "F1",
@@ -39,8 +40,10 @@ def extract_flag_intervals(log_file):
             flag_key = flag_match.group(1)
 
             if flag_key in flag_mapping:
+                dt_timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+
                 if flag_mapping[flag_key] == "F1" and f1_base_time is None:
-                    f1_base_time = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                    f1_base_time = dt_timestamp
 
                 if current_flag is None:
                     current_flag = flag_mapping[flag_key]
@@ -53,4 +56,21 @@ def extract_flag_intervals(log_file):
                     current_flag = flag_mapping[flag_key]
                     start_time = timestamp
 
-    return flag_intervals
+                last_event_time = dt_timestamp
+
+    total_duration_seconds = None
+    if f1_base_time and last_event_time:
+        total_duration_seconds = int((last_event_time - f1_base_time).total_seconds())
+
+    return flag_intervals, f1_base_time, total_duration_seconds
+
+
+
+# Function to convert time string to seconds since start of the day
+def time_to_seconds(time_str):
+    t = datetime.strptime(time_str, '%H:%M:%S')
+    return t.hour * 3600 + t.minute * 60 + t.second
+
+# Function to convert seconds since start of the day to time string
+def seconds_to_time(seconds):
+    return str(timedelta(seconds=seconds))

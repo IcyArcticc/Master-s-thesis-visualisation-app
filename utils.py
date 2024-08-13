@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import re
+import os
 
 def extract_flag_intervals(log_file):
     with open(log_file, 'r') as file:
@@ -65,7 +66,6 @@ def extract_flag_intervals(log_file):
     return flag_intervals, f1_base_time, total_duration_seconds
 
 
-
 # Function to convert time string to seconds since start of the day
 def time_to_seconds(time_str):
     t = datetime.strptime(time_str, '%H:%M:%S')
@@ -74,3 +74,23 @@ def time_to_seconds(time_str):
 # Function to convert seconds since start of the day to time string
 def seconds_to_time(seconds):
     return str(timedelta(seconds=seconds))
+
+def search_files(folder_path):
+    log_file = None
+    bdf_file = None
+    
+    # Search in folder
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith('.log') and log_file is None:
+                log_file = os.path.join(root, file)
+            elif file.endswith('.bdf') and bdf_file is None:
+                bdf_file = os.path.join(root, file)
+            
+            # Stopping search when files are found
+            if log_file and bdf_file:
+                break
+        if log_file and bdf_file:
+            break
+    
+    return log_file, bdf_file

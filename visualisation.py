@@ -1,12 +1,13 @@
 import mne
+from mne.preprocessing import ICA
 import os
 import utils
+import numpy as np
 
 # ---------------- Main function to execute the script ----------------
 if __name__ == "__main__":
     # Search for log file and bdf file in given driectory (only one file of each type should be present)
-    log_file, bdf_file_path = utils.search_files('C:/Users/Adrian/Desktop/Magisterka/Badania/16.07.2024/2024-07-16_11-37-00_EJ74')
-    # log_file = 'C:/Users/Adrian/Desktop/Magisterka/Badania/22.05.2024/EL/2024-05-22_12-39-16.log'
+    log_file, bdf_file_path = utils.search_files('path/to/folder/with/.log/and/.bdf')
     flag_intervals, f1_base_time, total_duration_seconds = utils.extract_flag_intervals(log_file)
     
     for interval in flag_intervals:
@@ -21,7 +22,6 @@ if __name__ == "__main__":
 
 
 # Load EEG data from a file (.bdf)
-# bdf_file_path = 'C:/Users/Adrian/Desktop/Magisterka/Badania/22.05.2024/EL/Testdata.bdf' # Bdf file path
 raw = mne.io.read_raw_bdf(bdf_file_path, preload=True)
 raw.load_data()
 
@@ -75,10 +75,8 @@ else:
 sync_start_time = utils.seconds_to_time(sync_start_seconds)
 sync_end_time = utils.seconds_to_time(sync_end_seconds)
 
-# ------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------
 
-raw.crop(tmin=cut_from_start, tmax=(bdf_duration - cut_from_end))
-raw.filter(0., 105., fir_design='firwin')
 # Create needed directories
 directory_path = os.path.dirname(bdf_file_path)
 os.makedirs(f'{directory_path}/Images', exist_ok=True)
@@ -113,13 +111,49 @@ raw.rename_channels(mapping=channels_dict)
 raw.set_montage('biosemi16')  
 raw.info['ch_names']
 
+# Cropping and filtering data
+raw.crop(tmin=cut_from_start, tmax=(bdf_duration - cut_from_end))
+raw.plot(block=True)
+raw.filter(0.1, 45, fir_design='firwin')
+raw.plot(block=True)
+# Deleting current freq and its harmonics
+raw.notch_filter(freqs=[50, 60, 100, 120], fir_design='firwin')
+raw.plot(block=True)
+
+# Wavelet denoising
+denoised_data = np.apply_along_axis(utils.wavelet_denoising, 1, raw.get_data(), wavelet='sym4', adaptive_threshold=True)
+info = raw.info
+wavelet_denoised_raw = mne.io.RawArray(denoised_data, info)
+wavelet_denoised_raw.plot(block=True)
+
+# ICA filtering
+# only 16 channels so it doesnt need PCA before
+ica = ICA(n_components=15, random_state=97, max_iter=800)
+ica.fit(wavelet_denoised_raw)
+
+# Searching and disposing of eye movement
+eog_indices, eog_scores = ica.find_bads_eog(wavelet_denoised_raw, ch_name=['Fp1', 'Fp2'])
+ica.exclude = eog_indices
+reconstructed_raw = ica.apply(wavelet_denoised_raw.copy())
+reconstructed_raw.plot(block=True)
+
+ica_second_pass = ICA(n_components=15, random_state=97, max_iter=800)
+ica_second_pass.fit(reconstructed_raw)
+reconstructed_raw = ica_second_pass.apply(reconstructed_raw.copy())
+reconstructed_raw.plot(block=True)
+
+#saving
+reconstructed_raw.save('cleaned_eeg_raw.fif', overwrite=True)
+ica.save('model-ica.fif', overwrite=True)
+
+
 # Save images in found time intervals
 for interval in flag_intervals:
     tmin = interval[0]
     tmax = interval[1]
-    raw_copy = raw.copy()
-    przedzial = raw_copy
-    przedzial = przedzial.crop(tmin=tmin, tmax=tmax)
+    przedzial = reconstructed_raw.copy().crop(tmin=tmin, tmax=tmax)
+    # raw_copy = raw.copy()
+    # przedzial = przedzial.crop(tmin=tmin, tmax=tmax)
     przedzial_spectrum = przedzial.compute_psd()
 
     plot_psd = przedzial.plot_psd(fmin=0.01, fmax=101, show=False, picks=['Fp1', 'Fp2', 'F3', 'Fz', 'F4', 'C3', 'Cz', 'C4'])
@@ -127,16 +161,14 @@ for interval in flag_intervals:
 
     plot_psd = przedzial.plot_psd(fmin=0.01, fmax=101, show=False, picks=['T7', 'T8', 'P3', 'Pz', 'P4', 'O1', 'Oz', 'O2'])
     plot_psd.savefig(f'{directory_path}/Images/part_{tmin}_{tmax}_{interval[2]}_PSD2.png', dpi=200)
-    #stare
-#   fig = przedzial_spectrum.plot_topomap(cmap=('jet','True'), show_names=True, show=False)
-#nowe
-    fig = przedzial_spectrum.plot_topomap(bands={'Delta (0.1-3.9 Hz)': (0.1, 3.9), 'Theta (4-7.9 Hz)': (4, 7.9),
-                                                 'Alpha (8-12.9 Hz)': (8, 12.9), 'Beta (13-29.9 Hz)': (13, 29.9),
-                                                 'Low Gamma (30-59,9 Hz)': (30, 59.9), 'High Gamma (60-100 Hz)':(60, 100)}, 
+    fig = przedzial_spectrum.plot_topomap(bands={'Delta (0.1-3.9 Hz)': (0.1, 3.9), 
+                                                 'Theta (4-7.9 Hz)': (4, 7.9),
+                                                 'Alpha (8-12.9 Hz)': (8, 12.9), 
+                                                 'Beta (13-29.9 Hz)': (13, 29.9),
+                                                 'Low Gamma (30-59,9 Hz)': (30, 59.9), 
+                                                 'High Gamma (60-100 Hz)':(60, 100)}, 
                                                  cmap=('jet','True'), show_names=True, show=False)
     # to change size first set width and height to assign right proportions, then set dpi value to set amount of pixels needed for clear image
     fig.set_figwidth(25)
     fig.set_figheight(10)
     fig.savefig(f'{directory_path}/Images/part_{tmin}_{tmax}_{interval[2]}.png', dpi=300)
-
-

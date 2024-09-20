@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 import re
 import os
+import pywt
+import numpy as np
 
 def extract_flag_intervals(log_file):
     with open(log_file, 'r') as file:
@@ -94,3 +96,18 @@ def search_files(folder_path):
             break
     
     return log_file, bdf_file
+
+def wavelet_denoising(data, wavelet='sym4', adaptive_threshold=True, level=5, threshold=None):
+    # Perform wavelet decomposition
+    coeffs = pywt.wavedec(data, wavelet, level=level)
+    
+    # Apply thresholding
+    if adaptive_threshold:
+        threshold = np.median(np.abs(coeffs[-1])) / 0.6745  # Example: using median absolute deviation (MAD) for threshold
+    if threshold is not None:
+        coeffs[1:] = [pywt.threshold(i, value=threshold, mode='soft') for i in coeffs[1:]]
+    
+    # Reconstruct the signal
+    reconstructed_data = pywt.waverec(coeffs, wavelet)
+    
+    return reconstructed_data
